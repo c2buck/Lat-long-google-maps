@@ -12,8 +12,12 @@ file_name = input("Please enter the name of the CSV file (e.g., 'XXXX.csv'): ")
 # Prompt for additional text to add to the output file name
 output_suffix = input("Enter additional text to add to the output filename (e.g., 'Filtered', 'Accuracy_Only'): ")
 
-# Prompt for the accuracy threshold
-accuracy_threshold = float(input("Enter the accuracy threshold in meters (e.g., '100' for filtering points below 100 meters): "))
+# Prompt for the accuracy threshold, allowing an option to not filter
+accuracy_threshold_input = input("Enter the maximum accuracy threshold in meters (e.g., '7' to filter points with accuracy 7 and under, or press Enter to include all points): ")
+accuracy_threshold = int(accuracy_threshold_input) if accuracy_threshold_input else None
+
+# Prompt for the data to be displayed in the KML points
+data_options = input("Enter the data to display on the Google Maps icon (e.g., 'date,time', 'time', 'speed', or press Enter for default - accuracy): ").split(',')
 
 # Construct the full path by joining the base directory and the file name
 input_file = os.path.join(base_directory, file_name)
@@ -23,8 +27,9 @@ if not os.path.isfile(input_file):
     print(f"Error: The file '{input_file}' does not exist. Please check the file name and try again.")
     exit()
 
-# Generate the output file name with the suffix
-output_filename = f"{os.path.splitext(file_name)[0]}_{output_suffix}.kml"
+# Generate the output file name with the suffix and selected data options
+selected_data_str = '_'.join([opt.strip() for opt in data_options if opt.strip()]) if data_options[0] else 'accuracy'
+output_filename = f"{os.path.splitext(file_name)[0]}_{output_suffix}_{selected_data_str}.kml"
 output_file = os.path.join(base_directory, output_filename)
 
 # Print statements to confirm the paths being used
@@ -34,17 +39,25 @@ print(f"Saving KML file to: {output_file}")
 # Load the CSV file into a DataFrame
 df = pd.read_csv(input_file)
 
-# Filter rows where 'Accuracy (m)' is below the user-defined threshold
-df = df[df['Accuracy (m)'] < accuracy_threshold]
+# Round the 'Accuracy (m)' values to whole numbers for filtering
+df['Accuracy (m)'] = df['Accuracy (m)'].round()
+
+# Filter rows where 'Accuracy (m)' is less than or equal to the user-defined threshold, if provided
+if accuracy_threshold is not None:
+    df = df[df['Accuracy (m)'] <= accuracy_threshold]
 
 # Print the first few rows to confirm data is loaded and filtered correctly
-print(f"Data loaded and filtered from CSV (Accuracy < {accuracy_threshold} m):")
+if accuracy_threshold is not None:
+    print(f"Data loaded and filtered from CSV (Accuracy <= {accuracy_threshold} m):")
+else:
+    print("Data loaded from CSV (no filtering applied):")
 print(df.head())
 
 # Create a new KML object and set the document name
 file_name_without_extension = os.path.splitext(file_name)[0]
 kml = simplekml.Kml()
-kml.document.name = f"{output_suffix} - Filtered Locations (Accuracy < {accuracy_threshold} m) - {file_name_without_extension}"
+kml.document.name = f"{output_suffix} - Filtered Locations (Accuracy <= {accuracy_threshold} m) - {file_name_without_extension}" if accuracy_threshold is not None else f"{output_suffix} - All Locations - {file_name_without_extension}"
+kml.document.description = f"Data displayed on Google Maps icon: {', '.join(data_options) if data_options[0] else 'accuracy'}"
 
 # Loop through each row in the filtered DataFrame
 for index, row in df.iterrows():
@@ -62,11 +75,18 @@ for index, row in df.iterrows():
     # Set a TimeStamp for the point
     pnt.timestamp.when = start_time
 
-    # Set the name as the accuracy value without decimals
-    accuracy_name = int(row['Accuracy (m)']) if pd.notna(row['Accuracy (m)']) else "N/A"
-    pnt.name = f"{accuracy_name} m"
-    print(f"\nCreating point {index + 1}:")
-    print(f"Accuracy (Name): {pnt.name}")
+    # Set the name based on user-selected data options
+    if 'date' in data_options and 'time' in data_options:
+        pnt.name = timestamp_dt.strftime("%d/%m/%Y %I:%M:%S %p").lstrip("0")
+    elif 'time' in data_options:
+        pnt.name = timestamp_dt.strftime("%I:%M:%S %p").lstrip("0")
+    elif 'speed' in data_options:
+        pnt.name = f"Speed: {int(row['Speed (m/s)']) if pd.notna(row['Speed (m/s)']) else 'N/A'} m/s"
+    else:
+        accuracy_name = int(row['Accuracy (m)']) if pd.notna(row['Accuracy (m)']) else "N/A"
+        pnt.name = f"{accuracy_name} m"
+    
+    print(f"\nCreating point {index + 1}: Name = {pnt.name}")
 
     # Set the coordinates (longitude, latitude)
     pnt.coords = [(row['Longitude'], row['Latitude'])]
@@ -79,20 +99,21 @@ for index, row in df.iterrows():
     pnt.style.labelstyle.scale = 1.0  # Set label size to 1.0
 
     # Construct the description field
-    full_accuracy = row['Accuracy (m)'] if pd.notna(row['Accuracy (m)']) else "N/A"
-    full_time = timestamp_dt.strftime("%I:%M:%S %p").lstrip("0")
+    description = ""
     full_date = timestamp_dt.strftime("%d/%m/%Y")
-    description = (
-        f"Date: {full_date}\n"
-        f"Full Time: {full_time}\n"
-        f"Accuracy: {full_accuracy} m\n"
-        f"Altitude: {int(row['Altitude (m)']) if pd.notna(row['Altitude (m)']) else 'N/A'} m\n"
-        f"Altitude Accuracy: {int(row['Altitude Accuracy (m)']) if pd.notna(row['Altitude Accuracy (m)']) else 'N/A'} m\n"
-        f"Direction: {int(row['Direction']) if pd.notna(row['Direction']) else 'N/A'}°\n"
-        f"Speed: {int(row['Speed (m/s)']) if pd.notna(row['Speed (m/s)']) else 'N/A'} m/s\n"
-        f"Source: {row['Source'] if pd.notna(row['Source']) else 'N/A'}\n"
-        f"Location: {row['Location'] if pd.notna(row['Location']) else 'N/A'}"
-    )
+    description += f"Date: {full_date}\n"
+    full_time = timestamp_dt.strftime("%I:%M:%S %p").lstrip("0")
+    description += f"Full Time: {full_time}\n"
+    full_accuracy = row['Accuracy (m)'] if pd.notna(row['Accuracy (m)']) else "N/A"
+    description += f"Accuracy: {full_accuracy} m\n"
+    speed = int(row['Speed (m/s)']) if pd.notna(row['Speed (m/s)']) else "N/A"
+    description += f"Speed: {speed} m/s\n"
+    description += f"Altitude: {int(row['Altitude (m)']) if pd.notna(row['Altitude (m)']) else 'N/A'} m\n"
+    description += f"Altitude Accuracy: {int(row['Altitude Accuracy (m)']) if pd.notna(row['Altitude Accuracy (m)']) else 'N/A'} m\n"
+    description += f"Direction: {int(row['Direction']) if pd.notna(row['Direction']) else 'N/A'}°\n"
+    description += f"Source: {row['Source'] if pd.notna(row['Source']) else 'N/A'}\n"
+    description += f"Location: {row['Location'] if pd.notna(row['Location']) else 'N/A'}"
+
     pnt.description = description
     print("Description:")
     print(description)
