@@ -16,8 +16,17 @@ output_suffix = input("Enter additional text to add to the output filename (e.g.
 accuracy_threshold_input = input("Enter the maximum accuracy threshold in meters (e.g., '7' to filter points with accuracy 7 and under, or press Enter to include all points): ")
 accuracy_threshold = int(accuracy_threshold_input) if accuracy_threshold_input else None
 
-# Prompt for the data to be displayed in the KML points
-data_options = input("Enter the data to display on the Google Maps icon (e.g., 'date,time', 'time', 'speed', or press Enter for default - accuracy): ").split(',')
+# Prompt for the data to be displayed in the KML points, with multiple questions for clarity
+data_options = []
+while True:
+    option = input("What data do you want displayed on the Google Maps icon? (e.g., 'date', 'time', 'speed', 'accuracy', or press Enter to finish): ")
+    if option:
+        data_options.append(option.strip().lower())
+    else:
+        break
+
+if not data_options:
+    data_options = ['accuracy']  # Default to accuracy if no options are provided
 
 # Construct the full path by joining the base directory and the file name
 input_file = os.path.join(base_directory, file_name)
@@ -28,7 +37,7 @@ if not os.path.isfile(input_file):
     exit()
 
 # Generate the output file name with the suffix and selected data options
-selected_data_str = '_'.join([opt.strip() for opt in data_options if opt.strip()]) if data_options[0] else 'accuracy'
+selected_data_str = '_'.join(data_options)
 output_filename = f"{os.path.splitext(file_name)[0]}_{output_suffix}_{selected_data_str}.kml"
 output_file = os.path.join(base_directory, output_filename)
 
@@ -57,7 +66,7 @@ print(df.head())
 file_name_without_extension = os.path.splitext(file_name)[0]
 kml = simplekml.Kml()
 kml.document.name = f"{output_suffix} - Filtered Locations (Accuracy <= {accuracy_threshold} m) - {file_name_without_extension}" if accuracy_threshold is not None else f"{output_suffix} - All Locations - {file_name_without_extension}"
-kml.document.description = f"Data displayed on Google Maps icon: {', '.join(data_options) if data_options[0] else 'accuracy'}"
+kml.document.description = f"Data displayed on Google Maps icon: {', '.join(data_options)}"
 
 # Loop through each row in the filtered DataFrame
 for index, row in df.iterrows():
@@ -76,15 +85,17 @@ for index, row in df.iterrows():
     pnt.timestamp.when = start_time
 
     # Set the name based on user-selected data options
-    if 'date' in data_options and 'time' in data_options:
-        pnt.name = timestamp_dt.strftime("%d/%m/%Y %I:%M:%S %p").lstrip("0")
-    elif 'time' in data_options:
-        pnt.name = timestamp_dt.strftime("%I:%M:%S %p").lstrip("0")
-    elif 'speed' in data_options:
-        pnt.name = f"Speed: {int(row['Speed (m/s)']) if pd.notna(row['Speed (m/s)']) else 'N/A'} m/s"
-    else:
-        accuracy_name = int(row['Accuracy (m)']) if pd.notna(row['Accuracy (m)']) else "N/A"
-        pnt.name = f"{accuracy_name} m"
+    selected_name_parts = []
+    if 'date' in data_options:
+        selected_name_parts.append(timestamp_dt.strftime("%d/%m/%Y"))
+    if 'time' in data_options:
+        selected_name_parts.append(timestamp_dt.strftime("%I:%M:%S %p").lstrip("0"))
+    if 'speed' in data_options:
+        selected_name_parts.append(f"{int(row['Speed (m/s)']) if pd.notna(row['Speed (m/s)']) else 'N/A'} m/s")
+    if 'accuracy' in data_options:
+        selected_name_parts.append(f"{int(row['Accuracy (m)']) if pd.notna(row['Accuracy (m)']) else 'N/A'}m")
+
+    pnt.name = ' | '.join(selected_name_parts)
     
     print(f"\nCreating point {index + 1}: Name = {pnt.name}")
 
